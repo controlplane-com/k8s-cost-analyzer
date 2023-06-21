@@ -1,0 +1,96 @@
+name: K8s Cost Analyzer Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    outputs:
+      release-url: ${{ steps.create-new-release.outputs.upload_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Read version from config.json
+        id: read-version
+        run: echo "version=$(jq -r '.version' config.json)" >> $GITHUB_OUTPUT
+
+      - name: Create New Release
+        id: create-new-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.read-version.outputs.version }}
+          release_name: v${{ steps.read-version.outputs.version }}
+          draft: false
+          prerelease: false
+          
+  build:
+    needs: release
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: pwsh
+
+    strategy:
+      matrix:
+        os: [windows-latest, macOS-latest, ubuntu-latest]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+      
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Determine Executable Name
+        id: determine-executable-name
+        run: |
+
+          $extension = ""
+
+          if ('${{ matrix.os }}' -eq 'windows-latest')
+          {
+            $type = "windows"
+            $extension = ".exe"
+          }
+
+          elseif ('${{ matrix.os }}' -eq 'macOS-latest')
+          {
+            $type = "macOS"
+          }
+
+          else
+          {
+            $type = "linux"
+          }
+          
+          echo "EXECUTABLE_NAME=k8s-cost-analyzer-$type$extension" >> $env:GITHUB_OUTPUT
+
+      - name: Build executables
+        run: pyinstaller main.py --onefile --name "${{ steps.determine-executable-name.outputs.EXECUTABLE_NAME }}" --distpath releases/
+      
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.release-url }}
+          asset_path: releases/${{ steps.determine-executable-name.outputs.EXECUTABLE_NAME }}
+          asset_name: ${{ steps.determine-executable-name.outputs.EXECUTABLE_NAME }}
+          asset_content_type: application/octet-stream

@@ -1,19 +1,8 @@
 """
 ; Control Plane - K8s Cost Analyzer
 
-; Description:
-; This scripts collects detailed K8s cluster resources consumption. The script is READ-ONLY, which
-; means it doesn't make any changes to your cluster or its components.
-
-; Prerequisites:
-; 1. 'kubectl' must be installed on the system.
-; 2. 'metric-server' OR 'prometheus' available on the cluster.
-
-; Notes:
-; ** For 'prometheus' queries, a free port is opened in the range of 3010-3040 for port-forwarding,
-;    which is closed when the script receives an exit signal.
-; ** For 'metrics-server' method, you need to have the kubectl command and the 'metrics-server'
-     deployed on your cluster.
+; This script belongs to this repository: https://github.com/controlplane-com/k8s-cost-analyzer
+; Make sure you meet the prerequisites there before running the script
 """
 
 import os
@@ -22,6 +11,8 @@ import sys
 import time
 import json
 import signal
+import certifi
+import colorama
 import threading
 import platform
 import subprocess
@@ -75,6 +66,7 @@ class TopNode:
 class Node:
     def __init__(self):
         self.name = ""
+        self.explicit_price = 0.0
         self.consumbed_cpu = 0.0
         self.consumbed_memory = 0.0
         self.containers_consumbed_cpu = 0.0
@@ -139,6 +131,7 @@ ENDPOINT = "https://pricing-calculator.controlplane.site/submit-cluster"
 CLOUD_PROVIDER_AWS = "aws"
 CLOUD_PROVIDER_GCP = "gcp"
 CLOUD_PROVIDER_AZURE = "azure"
+CLOUD_PROVIDER_UNKNOWN = "unknown"
 
 # Pods Top/Get Column Names
 POD_NAMESPACE_COLUMN = "NAMESPACE"
@@ -179,11 +172,11 @@ TOP_NODES_TABLE_COLUMNS = {
 }
 
 # Colors
-BLUE = "\033[94m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
-GREEN = "\033[92m"
-END = "\033[0m"
+BLUE = colorama.Fore.BLUE
+YELLOW = colorama.Fore.YELLOW
+RED = colorama.Fore.RED
+GREEN = colorama.Fore.GREEN
+END = colorama.Style.RESET_ALL
 
 # Cluster Components
 KUBE_SYSTEM = Component("kube_system")
@@ -214,8 +207,9 @@ CLUSTER.components.extend(
 ### Functions ###
 def signal_handler(signal, frame):
     LOADING_ANIMATION.stop_loading()
-    log_info("\nScript interrupted.")
-    exit_script("The script has been gracefully terminated.")
+    log_info("\nScript interrupted")
+    log_info("The script has been gracefully terminated")
+    sys.exit(1)
 
 
 def log(text, color=""):
@@ -229,14 +223,7 @@ def log(text, color=""):
     Returns: `None`
     """
 
-    if os.isatty(1) and color:  # 1 represents the file descriptor for standard output
-        # ANSI escape codes are supported
-        # Use colors in print statements
-        print(color + text + END)
-    else:
-        # ANSI escape codes are not supported
-        # Print without colors
-        print(text)
+    print(color + text)
 
 
 def log_info(text):
@@ -292,14 +279,7 @@ def print_progress(text):
     Returns: `None`
     """
 
-    if os.isatty(1):  # 1 represents the file descriptor for standard output
-        # ANSI escape codes are supported
-        sys.stdout.write("\r" + YELLOW + text + END)
-    else:
-        # ANSI escape codes are not supported
-        # Write without colors
-        sys.stdout.write("\r" + text)
-
+    sys.stdout.write("\r" + YELLOW + text)
     sys.stdout.flush()
 
 
@@ -318,6 +298,27 @@ def clear_console_line(text):
     sys.stdout.flush()
 
 
+def input_color(prompt, color=""):
+    """
+    An input with an optional color formatting.
+
+    Parameters:
+        Required:
+        - prompt (`str`): The text to be printed.
+
+    Returns: `None`
+    """
+
+    if os.isatty(1) and color:  # 1 represents the file descriptor for standard output
+        # ANSI escape codes are supported
+        # Use colors in print statements
+        input(color + prompt + END)
+    else:
+        # ANSI escape codes are not supported
+        # Print without colors
+        input(prompt)
+
+
 def exit_script(reason, exit_code=1):
     """
     Terminate the script with an info reason and an exist code
@@ -331,6 +332,7 @@ def exit_script(reason, exit_code=1):
     """
 
     log_info(reason)
+    input_color("Press enter to exit...", YELLOW)
     sys.exit(exit_code)
 
 
@@ -347,7 +349,23 @@ def exit_script_on_error(reason, exit_code=1):
     """
 
     log_error(reason)
+    input_color("Press enter to exit...", RED)
     sys.exit(exit_code)
+
+
+def try_cmd_error(cmd, error):
+    """
+    Returns info about the command that returned an error along with the error it returned.
+
+    Parameters:
+        Required:
+        - cmd (`str`): The text to be printed.
+        - error (`str`): The command error.
+
+    Returns: `None`
+    """
+
+    return f"We tried to run the following command: `{cmd}` and it returned this error message: {error}"
 
 
 def send_http_post_request(url, json_data):
@@ -464,7 +482,7 @@ def get_input(prompt, validate_func=None, default=""):
             if default:
                 user_input = default
             else:
-                log_error("Input cannot be empty, please try again.")
+                log_error("Input cannot be empty, please try again")
                 continue
 
         # Perform input validation if `validate_func` is defined
@@ -505,7 +523,7 @@ def get_user_confirmation(prompt, option1="y", option2="n"):
         if response == option1 or response == option2:
             return response == option1
 
-        log_error(f"Invalid input. Please enter '{option1}' or '{option2}'.")
+        log_error(f"Invalid input. Please enter '{option1}' or '{option2}'")
 
 
 def is_kubectl_missing():
@@ -558,8 +576,9 @@ def validate_email(email):
 
     pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
     errorMessage = ""
+
     if re.match(pattern, email) is None:
-        errorMessage = "Email is invalid, please try again."
+        errorMessage = "Email is invalid, please try again"
 
     return errorMessage
 
@@ -576,8 +595,28 @@ def validate_time_period(time_period):
 
     pattern = r"^\d+[mhdw]$"
     errorMessage = ""
+
     if re.match(pattern, time_period) is None:
-        errorMessage = "Invalid time period, please try again."
+        errorMessage = "Invalid time period, please try again"
+
+    return errorMessage
+
+
+def validate_number(str):
+    """
+    Validates whether the provided string is a number or not.
+
+    Parameters:
+        - str (`str`): The string to validate.
+
+    Returns: The error message as a string.
+    """
+
+    pattern = r"^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$"
+    errorMessage = ""
+
+    if re.match(pattern, str) is None:
+        errorMessage = "Invalid input, please enter a valid number"
 
     return errorMessage
 
@@ -619,20 +658,29 @@ def serialize_object(obj):
     return obj.__dict__
 
 
+### Handle Arguments ###
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print("v1.0.0")
+    sys.exit(0)
+
 ### START ###
+colorama.init(autoreset=True)
+LOADING_ANIMATION.start_loading("Starting K8s Cost Analyzer, please wait")
+os.environ["SSL_CERT_FILE"] = certifi.where()
 signal.signal(signal.SIGINT, signal_handler)
 
 if sys.version_info.major != 3:
-    exit_script_on_error("This script requires Python 3.x or higher.")
+    exit_script_on_error("This script requires Python 3.x or higher")
 
 if is_kubectl_missing():
     exit_script_on_error(
-        "kubectl CLI is not found on this platform, make sure you have kubectl CLI installed and set up before running the script again."
+        "kubectl CLI is not found on this platform, make sure you have kubectl CLI installed and set up before running the script again"
     )
+LOADING_ANIMATION.stop_loading()
 
-log("\n*** Control Plane - K8s cost analyzer ***\n", BLUE)
+log("\n*** Control Plane - K8s Cost Analyzer ***\n", BLUE)
 log_info(
-    "This script gathers detailed resource consumption data of a K8s cluster in a read-only manner."
+    "This script gathers detailed resource consumption data of a K8s cluster in a read-only manner"
 )
 log_info(
     "After successful execution, a link to the result will be printed in the terminal.\n"
@@ -658,15 +706,15 @@ if check_prometheus:
             "Insert the namespace for Prometheus: (prometheus)", default="prometheus"
         )
 
+        cmd = f"kubectl get svc -n {prometheus_namespace}"
         cmd_output, cmd_code, cmd_err = run_system_command(
-            f"kubectl get svc -n {prometheus_namespace}",
-            f"Searching for the prometheus namespace: '{prometheus_namespace}'",
+            cmd, f"Searching for the prometheus namespace: '{prometheus_namespace}'"
         )
 
         if cmd_output.strip() or cmd_code != 0 or cmd_err:
             errorMessage = f"Prometheus server is not found in the specified namespace: '{prometheus_namespace}'"
             if cmd_err:
-                errorMessage = f"Error: {cmd_err}"
+                errorMessage = try_cmd_error(cmd, cmd_err)
 
             log_error(errorMessage)
 
@@ -695,19 +743,20 @@ if prometheus_namespace:
 
 else:
     # Check if 'metrics-server' is functional
+    cmd = "kubectl top node"
     top_nodes_output, cmd_code, cmd_err = run_system_command(
-        "kubectl top node", "Checking if metrics-server is available"
+        cmd, "Checking if metrics-server is available"
     )
 
     if cmd_code == 1:
-        cmd_err = "Error: Metrics API not available or is not healthy, please make sure that the metrics-server is deployed and ready in the cluster."
+        cmd_err = f"{cmd_err}\nPerhaps your kubeconfig isn’t pointing to a healthy cluster, or your K8s metrics API isn’t available. Please check your K8s cluster, and try again. Email support@controlplane.com and we’ll be happy to help troubleshoot with you"
 
     if cmd_code != 0:
-        exit_script_on_error(cmd_err)
+        exit_script_on_error(try_cmd_error(cmd, cmd_err))
 
     if len(top_nodes_output.strip().split("\n")) < 2:
         exit_script_on_error(
-            "`kubectl top nodes` command returned an empty list, make sure you have nodes running in your cluster"
+            f"`{cmd}` command returned an empty list, make sure you have nodes running in your cluster"
         )
 
     log_info(
@@ -715,29 +764,30 @@ else:
     )
 
     # STEP 3 - Start collecting metrics
+    cmd = "kubectl get pod -A --show-labels"
     get_pods_output, cmd_code, cmd_err = run_system_command(
-        "kubectl get pod -A --show-labels", "Collecting pods labels"
+        cmd, "Collecting pods labels"
     )
 
     if cmd_code != 0 or cmd_err:
-        exit_script_on_error(cmd_err)
+        exit_script_on_error(try_cmd_error(cmd, cmd_err))
 
     if not get_pods_output or len(get_pods_output.strip().split("\n")) < 2:
         exit_script_on_error(
-            "`kubectl get pod -A --show-labels` command returned an empty list, make sure you have pods running in your cluster"
+            f"`{cmd}` command returned an empty list, make sure you have pods running in your cluster"
         )
 
+    cmd = "kubectl top pod -A --containers=true"
     top_pods_output, cmd_code, cmd_err = run_system_command(
-        "kubectl top pod -A --containers=true",
-        "Collecting usage consumption of all running pods",
+        cmd, "Collecting usage consumption of all running pods"
     )
 
     if cmd_code != 0 or cmd_err:
-        exit_script_on_error(cmd_err)
+        exit_script_on_error(try_cmd_error(cmd, cmd_err))
 
     if not top_pods_output or len(top_pods_output.strip().split("\n")) < 2:
         exit_script_on_error(
-            "`kubectl top pod -A` command returned an empty list, make sure you have pods running in your cluster"
+            f"`{cmd}` command returned an empty list, make sure you have pods running in your cluster"
         )
 
     namespace_to_pod_mapping = {}
@@ -834,23 +884,23 @@ else:
         )
 
 # STEP 4 - Process nodes
+cmd = "kubectl get nodes -o json"
 json_nodes_output, cmd_code, cmd_err = run_system_command(
-    "kubectl get nodes -o json",
-    "Collecting info of all nodes in the cluster, please wait",
+    cmd, "Collecting info of all nodes in the cluster, please wait"
 )
 
 if cmd_code != 0:
-    exit_script_on_error(
-        "Failed to collect the names of all nodes in the cluster because: " + cmd_err
-    )
+    exit_script_on_error(try_cmd_error(cmd, cmd_err))
 
 # Collect nodes info and create new node instances
+nodes_sharing_type = {}
 nodes_json = json.loads(json_nodes_output)
 if "items" not in nodes_json:
-    exit_script_on_error("Error: we were not able to find nodes in your cluster")
+    exit_script_on_error("Error: we were unable to find nodes in your cluster")
 
 for index, node_json in enumerate(nodes_json["items"]):
     new_node = Node()
+    node_has_cloud_provider = True
     CLUSTER.nodes.append(new_node)
 
     try:
@@ -874,7 +924,6 @@ for index, node_json in enumerate(nodes_json["items"]):
     new_node.allocatable_memory = (
         extract_value_from_unit(node_allocatable_memory) / 1024
     )
-    new_node.purchase_option = "on_demand"
 
     # Get node consumbed cpu and memory
     if not has_prometheus:
@@ -891,10 +940,11 @@ for index, node_json in enumerate(nodes_json["items"]):
     elif node_provider_id.startswith("azure:"):
         new_node.cloud_provider = CLOUD_PROVIDER_AZURE
     else:
-        log_info(
-            f"WARNING: The node with the name '{node_name}' was skipped because it's cloud provider is not recognized."
-        )
-        continue
+        node_has_cloud_provider = False
+        new_node.cloud_provider = CLOUD_PROVIDER_UNKNOWN
+
+    if node_has_cloud_provider:
+        new_node.purchase_option = "on_demand"
 
     # Get instance-type and region from node labels
     for key, value in node_labels:
@@ -904,6 +954,7 @@ for index, node_json in enumerate(nodes_json["items"]):
         if "region" in key:
             new_node.region = value
 
+        # Set node purchase option based on the cloud provider
         if (
             new_node.cloud_provider == "aws"
             and ("eks.amazonaws.com/capacityType" == key or "node-lifecycle" in key)
@@ -925,11 +976,24 @@ for index, node_json in enumerate(nodes_json["items"]):
         ):
             new_node.purchase_option = "spot"
 
-    if not new_node.instance_type:
-        new_node.instance_type = "not-found"
+    if new_node.instance_type in nodes_sharing_type:
+        new_node.explicit_price = nodes_sharing_type[
+            new_node.instance_type
+        ].explicit_price
+        continue
 
-    if not new_node.region:
-        new_node.region = "not-found"
+    cost_request_message = f"this node with the name `{node_name}`"
+    if new_node.instance_type:
+        cost_request_message = f"one node of type {new_node.instance_type}"
+        nodes_sharing_type[new_node.instance_type] = new_node
+
+    if not node_has_cloud_provider:
+        new_node.explicit_price = float(
+            get_input(
+                f"Your K8s cluster is hosted by a provider we do not have pricing data for. Please provide the monthly cost for {cost_request_message}:",
+                validate_number,
+            )
+        )
 
 
 # STEP 5 - Prepare to submit to the data
@@ -944,7 +1008,7 @@ http_response, http_status = send_http_post_request(ENDPOINT, submission_json)
 LOADING_ANIMATION.stop_loading()
 
 if http_status < 200 or http_status > 299:
-    exit_script_on_error(http_response + ", Response Status: " + str(http_status))
+    exit_script_on_error(http_response)
 
 log_success("The script has executed successfully!")
 log_success(f"Here is the link to your result: {json.loads(http_response)}")

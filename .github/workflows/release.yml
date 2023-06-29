@@ -53,20 +53,24 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.x
+          python-version: 3.11
       
       - name: Install PyInstaller
-        run: pip install pyinstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
 
       - name: Determine Executable Name
         id: determine-executable-name
         run: |
 
+          $name = "k8s-cost-analyzer"
           $extension = ""
 
           if ('${{ matrix.os }}' -eq 'windows-latest')
           {
-            $type = "windows"
+            $type = "win-x64"
             $extension = ".exe"
           }
 
@@ -80,7 +84,7 @@ jobs:
             $type = "linux"
           }
           
-          echo "EXECUTABLE_NAME=k8s-cost-analyzer-$type$extension" >> $env:GITHUB_OUTPUT
+          echo "EXECUTABLE_NAME=$name-$type$extension" >> $env:GITHUB_OUTPUT
 
       - name: Build executables
         run: pyinstaller main.py --onefile --name "${{ steps.determine-executable-name.outputs.EXECUTABLE_NAME }}" --distpath releases/

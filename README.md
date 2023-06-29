@@ -1,6 +1,6 @@
 # Control Plane - K8s Cost Analyzer
 
-The K8s Cost Analyzer is designed to help you calculate the cost savings when running workloads on the [Control Plane](https://controlplane.com) platform versus running them on the major cloud providers (AWS, GCP and Azure). By analyzing the resource consumption of your Kubernetes cluster.
+The K8s Cost Analyzer is designed to help you calculate the cost savings when running workloads on the [Control Plane](https://controlplane.com) platform versus running them on any cloud provider. By analyzing the resource consumption of your Kubernetes cluster.
 
 Below is an [installation guide](#installation-guide) to help you run the K8s cost analyzer.
 
@@ -10,21 +10,55 @@ The analyzer will require you to enter your name and email. Upon successful exec
 
 Before you begin, ensure you have the following:
 
-* Kubernetes CLI (kubectl) installed on the target machine with sufficient privileges to read all objects in the desired cluster.
-* Kubernetes Metrics Server installed and healthy in the cluster.
-* The desired cluster must **only** be one of the following: Amazon EKS, Azure AKS, or Google GKE.
+* Kubernetes CLI ([kubectl](https://kubernetes.io/docs/tasks/tools/)) is installed on the target machine with sufficient privileges to read all objects in the desired cluster.
+* Kubernetes [Metrics Server](https://github.com/kubernetes-sigs/metrics-server) is installed and healthy in the desired cluster.
 
 <h2 id="installation-guide">Installation Guide</h2>
 
-There are two ways in which you can download and run the K8s cost analyzer. You can download and run the Python script directly or you can download the appropriate executable file for your operating system (Windows, macOS or Linux).
+There are two ways in which you can download and run the K8s cost analyzer. You can clone the repository and run the Python script directly or you can download the executable file for your operating system (Windows, macOS or Linux).
 
-### Option 1: Download & Execute the Python script:
+### Option 1: Download and execute the Python script (Recommended approach):
 
-1. Clone this repository to your local machine or download the Python script file directly.
-2. Open a terminal or a command prompt and navigate to the directory where the Python script is located.
-3. Run the script using the following command: `python script_name.py`
+1. Make sure you have [python](https://www.python.org/downloads/) installed on the target machine, we recommend at least python version 3.11.
+2. Clone this repository:
 
-### Option 2: Run an executable:
+```bash
+git clone https://github.com/controlplane-com/k8s-cost-analyzer.git
+```
+
+3. Inside the repository directory, create a virtual environment (Optional but recommended):
+
+```bash
+python -m venv venv
+```
+
+4. If you did step 2, then activate the virtual environment:
+
+* On Windows:
+
+```bash
+source venv\Scripts\activate
+```
+
+* On macOS & Linux
+
+```bash
+source venv/bin/activate
+```
+
+5. Install the required packages using [pip](https://pip.pypa.io/en/stable/installation/):
+
+```bash
+pip install -r requirements.txt
+```
+
+6. Finally, execute the `main.py` file: 
+
+```bash
+python main.py
+```
+
+### Option 2: Run a packaged binary:
 
 To ensure a seamless experience, we have compiled the Python script using PyInstaller, making it executable on Windows, macOS and Linux. You can easily download the executable file from the [Releases](https://github.com/controlplane-com/k8s-cost-analyzer/releases) section of this repository.
 

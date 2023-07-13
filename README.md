@@ -10,14 +10,34 @@ The analyzer will require you to enter your name and email. Upon successful exec
 
 Before you begin, ensure you have the following:
 
-* Kubernetes CLI ([kubectl](https://kubernetes.io/docs/tasks/tools/)) is installed on the target machine with sufficient privileges to read all objects in the desired cluster.
+* Kubernetes CLI ([kubectl](https://kubernetes.io/docs/tasks/tools)) is installed on the target machine with sufficient privileges to read all objects in the desired cluster.
 * Kubernetes [Metrics Server](https://github.com/kubernetes-sigs/metrics-server) is installed and healthy in the desired cluster.
 
 <h2 id="installation-guide">Installation Guide</h2>
 
-There are two ways in which you can download and run the K8s cost analyzer. You can clone the repository and run the Python script directly or you can download the executable file for your operating system (Windows, macOS or Linux).
+There are three ways in which you can download and run the K8s cost analyzer. You can download cpln-k8s-cost-analyzer through homebrew or chocolatey or you can clone the repository and run the Python script directly. Alternatively, you can run a packaged binary from releases and execute it.
 
-### Option 1: Download and execute the Python script (Recommended approach):
+### Option 1: Download cpln-k8s-cost-analyzer
+
+#### For macOS & Linux
+
+Make sure you have [Homebrew](https://brew.sh) installed on the target machine, for Linux you need to have [Linuxbrew](https://docs.brew.sh/Homebrew-on-Linux). Once obtained, execute the following command in your terminal:
+
+```bash
+brew tap controlplane-com/cpln && brew install cpln-k8s-cost-analyzer
+```
+
+#### For Windows
+
+Make sure you have [chocolatey](https://chocolatey.org/install) installed on the target machine then execute the following command in your terminal:
+
+```bash
+choco install cpln-k8s-cost-analyzer
+```
+
+Once downloaded successfully, run `cpln-k8s-cost-analyzer` in your terminal to execute the K8s cost analyzer.
+
+### Option 2: Download and execute the Python script (Recommended approach):
 
 1. Make sure you have [python](https://www.python.org/downloads/) installed on the target machine, we recommend at least python version 3.11.
 2. Clone this repository:
@@ -58,7 +78,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Option 2: Run a packaged binary:
+### Option 3: Run a packaged binary:
 
 To ensure a seamless experience, we have compiled the Python script using PyInstaller, making it executable on Windows, macOS and Linux. You can easily download the executable file from the [Releases](https://github.com/controlplane-com/k8s-cost-analyzer/releases) section of this repository.
 

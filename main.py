@@ -96,6 +96,7 @@ class Component:
 
 class Cluster:
     def __init__(self):
+        self.name = ""
         self.total_usage_cpu = 0.0
         self.total_usage_memory = 0.0
         self.components = []
@@ -125,7 +126,8 @@ DEFAULT_QUERY_TIME_PERIOD = 48
 DEFAULT_QUERY_TIME_PERIOD_FORMATTED = f"{DEFAULT_QUERY_TIME_PERIOD}h"
 LOADING_ANIMATION = LoadingAnimation()
 CLUSTER = Cluster()
-ENDPOINT = "https://pricing-calculator.controlplane.site/submit-cluster"
+# ENDPOINT = "https://pricing-calculator.controlplane.site/submit-cluster"
+ENDPOINT = "http://localhost:3000/submit-cluster"
 
 # Cloud Providers
 CLOUD_PROVIDER_AWS = "aws"
@@ -883,7 +885,19 @@ else:
             node_cpu, node_memory, node_requests_cpu, node_requests_memory
         )
 
-# STEP 4 - Process nodes
+
+# STEP 4- Set cluster name
+cmd = "kubectl config current-context"
+current_context_output, cmd_code, cmd_err = run_system_command(
+    cmd, "Getting cluster name"
+)
+
+if cmd_code != 0:
+    exit_script_on_error(try_cmd_error(cmd, cmd_err))
+
+CLUSTER.name = current_context_output
+
+# STEP 5 - Process nodes
 cmd = "kubectl get nodes -o json"
 json_nodes_output, cmd_code, cmd_err = run_system_command(
     cmd, "Collecting info of all nodes in the cluster, please wait"
@@ -996,13 +1010,13 @@ for index, node_json in enumerate(nodes_json["items"]):
         )
 
 
-# STEP 5 - Prepare to submit to the data
+# STEP 6 - Prepare to submit to the data
 CLUSTER.prepare()
 submission = Submission(user_name, user_email, CLUSTER)
 submission_json = json.dumps(submission, default=serialize_object).encode("utf-8")
 log_info("[INFO] Cluster info has been collected successfully \n")
 
-# STEP 6 - Submit the data
+# STEP 7 - Submit the data
 LOADING_ANIMATION.start_loading("Submitting the cluster info to the backend")
 http_response, http_status = send_http_post_request(ENDPOINT, submission_json)
 LOADING_ANIMATION.stop_loading()

@@ -97,6 +97,7 @@ class Component:
 class Cluster:
     def __init__(self):
         self.name = ""
+        self.kubernetes_version = ""
         self.total_usage_cpu = 0.0
         self.total_usage_memory = 0.0
         self.components = []
@@ -126,8 +127,7 @@ DEFAULT_QUERY_TIME_PERIOD = 48
 DEFAULT_QUERY_TIME_PERIOD_FORMATTED = f"{DEFAULT_QUERY_TIME_PERIOD}h"
 LOADING_ANIMATION = LoadingAnimation()
 CLUSTER = Cluster()
-# ENDPOINT = "https://pricing-calculator.controlplane.site/submit-cluster"
-ENDPOINT = "http://localhost:3000/submit-cluster"
+ENDPOINT = "https://pricing-calculator.controlplane.site/submit-cluster"
 
 # Cloud Providers
 CLOUD_PROVIDER_AWS = "aws"
@@ -662,7 +662,7 @@ def serialize_object(obj):
 
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.0.0")
+    print("v1.0.2")
     sys.exit(0)
 
 ### START ###
@@ -886,7 +886,7 @@ else:
         )
 
 
-# STEP 4- Set cluster name
+# STEP 4- Get cluster name & kubernetes version
 cmd = "kubectl config current-context"
 current_context_output, cmd_code, cmd_err = run_system_command(
     cmd, "Getting cluster name"
@@ -895,7 +895,24 @@ current_context_output, cmd_code, cmd_err = run_system_command(
 if cmd_code != 0:
     exit_script_on_error(try_cmd_error(cmd, cmd_err))
 
-CLUSTER.name = current_context_output
+cmd = "kubectl version --short -o json"
+kubernetes_version_json, cmd_code, cmd_err = run_system_command(
+    cmd, "Getting kubernetes version"
+)
+
+if cmd_code != 0:
+    exit_script_on_error(try_cmd_error(cmd, cmd_err))
+
+try:
+    kubernetes_version_dict = json.loads(kubernetes_version_json)
+
+    CLUSTER.name = current_context_output
+    CLUSTER.kubernetes_version = kubernetes_version_dict["serverVersion"]["gitVersion"]
+
+except Exception as e:
+    exit_script_on_error(
+        f"ERROR: we were unable to get Kubernetes version. Exception: {str(e)}"
+    )
 
 # STEP 5 - Process nodes
 cmd = "kubectl get nodes -o json"

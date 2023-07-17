@@ -37,7 +37,7 @@ choco install cpln-k8s-cost-analyzer
 
 Once downloaded successfully, run `cpln-k8s-cost-analyzer` in your terminal to execute the K8s cost analyzer.
 
-### Option 2: Download and execute the Python script (Recommended approach):
+### Option 2: Download and execute the Python script:
 
 1. Make sure you have [python](https://www.python.org/downloads/) installed on the target machine, we recommend at least python version 3.11.
 2. Clone this repository:

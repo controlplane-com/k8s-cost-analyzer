@@ -39,7 +39,7 @@ Once downloaded successfully, run `cpln-k8s-cost-analyzer` in your terminal to e
 
 ### Option 2: Download and execute the Python script:
 
-1. Make sure you have [python](https://www.python.org/downloads/) installed on the target machine, we recommend at least python version 3.11.
+1. Make sure you have [python](https://www.python.org/downloads/) installed on the target machine, the minimum version that is needed to run the Python script is **3.6.15**.
 2. Clone this repository:
 
 ```bash

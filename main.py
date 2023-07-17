@@ -662,7 +662,7 @@ def serialize_object(obj):
 
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.0.0")
+    print("v1.0.2")
     sys.exit(0)
 
 ### START ###

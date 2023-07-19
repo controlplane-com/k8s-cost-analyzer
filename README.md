@@ -54,10 +54,10 @@ python -m venv venv
 
 4. If you did step 2, then activate the virtual environment:
 
-* On Windows:
+* On Windows (Use Bash or PowerShell for this command. But, if you want to use Command Prompt, remove the dot):
 
 ```bash
-source venv\Scripts\activate
+. venv/Scripts/activate
 ```
 
 * On macOS & Linux

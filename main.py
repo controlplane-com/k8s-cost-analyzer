@@ -350,6 +350,7 @@ def exit_script_on_error(reason, exit_code=1):
     Returns: `None`
     """
 
+    LOADING_ANIMATION.stop_loading()
     log_error(reason)
     input_color("Press enter to exit...", RED)
     sys.exit(exit_code)
@@ -662,7 +663,7 @@ def serialize_object(obj):
 
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.0.2")
+    print("v1.0.3")
     sys.exit(0)
 
 ### START ###

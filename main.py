@@ -661,9 +661,32 @@ def serialize_object(obj):
     return obj.__dict__
 
 
+def get_nested_value(keys_array, nested_dict, default_value):
+    """
+    Safely retrieves a nested value from a dictionary based on the provided keys array.
+
+    Parameters:
+        keys_array (list): A list of strings representing the sequence of nested keys.
+        nested_dict (dict): The dictionary from which the nested value will be retrieved.
+        default_value: The default value to be returned if any key is missing or the nesting structure is invalid..
+
+    Returns:
+        The nested value from the dictionary if all keys are valid and the nesting structure is correct.
+        If any key is missing or the nesting structure is invalid, it returns the default_value
+        (or None if not specified).
+    """
+
+    try:
+        for key in keys_array:
+            nested_dict = nested_dict[key]
+        return nested_dict
+    except (KeyError, TypeError):
+        return default_value
+
+
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.0.3")
+    print("v1.0.4")
     sys.exit(0)
 
 ### START ###
@@ -932,44 +955,49 @@ if "items" not in nodes_json:
 
 for index, node_json in enumerate(nodes_json["items"]):
     new_node = Node()
-    node_has_cloud_provider = True
-    CLUSTER.nodes.append(new_node)
 
-    try:
-        node_name = node_json["metadata"]["name"]
-        node_capacity_cpu = node_json["status"]["capacity"]["cpu"]
-        node_capacity_memory = node_json["status"]["capacity"]["memory"]
-        node_allocatable_cpu = node_json["status"]["allocatable"]["cpu"]
-        node_allocatable_memory = node_json["status"]["allocatable"]["memory"]
-        node_provider_id = node_json["spec"]["providerID"]
-        node_labels = node_json["metadata"]["labels"].items()
-    except Exception as e:
-        log_info(
-            f"WARNING: Skipping node number {index + 1} because it is missing expected keys in it's json output"
+    new_node.name = get_nested_value(["metadata", "name"], node_json, "unknown")
+    new_node.capacity_cpu = extract_value_from_unit(
+        get_nested_value(["status", "capacity", "cpu"], node_json, 0.0)
+    )
+    new_node.capacity_memory = extract_value_from_unit(
+        get_nested_value(["status", "capacity", "memory"], node_json, 0.0)
+    )
+    new_node.allocatable_cpu = (
+        extract_value_from_unit(
+            get_nested_value(["status", "allocatable", "cpu"], node_json, 0.0)
         )
-        continue
-
-    new_node.name = node_name
-    new_node.capacity_cpu = extract_value_from_unit(node_capacity_cpu)
-    new_node.capacity_memory = extract_value_from_unit(node_capacity_memory)
-    new_node.allocatable_cpu = extract_value_from_unit(node_allocatable_cpu) / 1000
+        / 1000
+    )
     new_node.allocatable_memory = (
-        extract_value_from_unit(node_allocatable_memory) / 1024
+        extract_value_from_unit(
+            get_nested_value(["status", "allocatable", "memory"], node_json, 0.0)
+        )
+        / 1024
+    )
+    new_node.cloud_provider = get_nested_value(
+        ["spec", "providerID"], node_json, CLOUD_PROVIDER_UNKNOWN
     )
 
-    # Get node consumbed cpu and memory
+    node_labels = get_nested_value(["metadata", "labels"], node_json, None)
+
+    # Assume the node has a cloud provider now, determine later
+    node_has_cloud_provider = True
+    cost_request_message = f"this node with the name `{node_name}`"
+
+    # Get node's consumbed cpu and memory
     if not has_prometheus:
         new_node.consumbed_cpu = top_nodes_dict[node_name].cpu
         new_node.consumbed_memory = top_nodes_dict[node_name].memory
         new_node.requests_cpu = top_nodes_dict[node_name].requests_cpu
         new_node.requests_memory = top_nodes_dict[node_name].requests_memory
 
-    # Get node cloud provider
-    if node_provider_id.startswith("aws:"):
+    # Determine cloud provider
+    if new_node.cloud_provider.startswith("aws:"):
         new_node.cloud_provider = CLOUD_PROVIDER_AWS
-    elif node_provider_id.startswith("gce:"):
+    elif new_node.cloud_provider.startswith("gce:"):
         new_node.cloud_provider = CLOUD_PROVIDER_GCP
-    elif node_provider_id.startswith("azure:"):
+    elif new_node.cloud_provider.startswith("azure:"):
         new_node.cloud_provider = CLOUD_PROVIDER_AZURE
     else:
         node_has_cloud_provider = False
@@ -978,47 +1006,65 @@ for index, node_json in enumerate(nodes_json["items"]):
     if node_has_cloud_provider:
         new_node.purchase_option = "on_demand"
 
-    # Get instance-type and region from node labels
-    for key, value in node_labels:
-        if "instance-type" in key:
-            new_node.instance_type = value
+    if node_labels != None:
+        node_labels = node_labels.items()
 
-        if "region" in key:
-            new_node.region = value
+        # Get instance-type and region from node labels
+        for key, value in node_labels:
+            if "instance-type" in key:
+                new_node.instance_type = value
 
-        # Set node purchase option based on the cloud provider
-        if (
-            new_node.cloud_provider == "aws"
-            and ("eks.amazonaws.com/capacityType" == key or "node-lifecycle" in key)
-            and value.lower() == "spot"
-        ):
-            new_node.purchase_option = "spot"
+            if "region" in key:
+                new_node.region = value
 
-        elif (
-            new_node.cloud_provider == "gcp"
-            and "cloud.google.com/gke-spot" == key
-            and value.lower() == "true"
-        ):
-            new_node.purchase_option = "spot"
+            # Set node purchase option based on the cloud provider
+            if (
+                new_node.cloud_provider == "aws"
+                and ("eks.amazonaws.com/capacityType" == key or "node-lifecycle" in key)
+                and value.lower() == "spot"
+            ):
+                new_node.purchase_option = "spot"
 
-        elif (
-            new_node.cloud_provider == "azure"
-            and "kubernetes.azure.com/scalesetpriority" == key
-            and value.lower() == "spot"
-        ):
-            new_node.purchase_option = "spot"
+            elif (
+                new_node.cloud_provider == "gcp"
+                and "cloud.google.com/gke-spot" == key
+                and value.lower() == "true"
+            ):
+                new_node.purchase_option = "spot"
 
+            elif (
+                new_node.cloud_provider == "azure"
+                and "kubernetes.azure.com/scalesetpriority" == key
+                and value.lower() == "spot"
+            ):
+                new_node.purchase_option = "spot"
+
+    if node_has_cloud_provider and (
+        not new_node.instance_type
+        or not new_node.region
+        or not new_node.purchase_option
+    ):
+        log_info(
+            f"WARNING: Skipping node number {index + 1} because it is missing labels"
+        )
+        continue
+
+    # Add node after it has passed validation
+    CLUSTER.nodes.append(new_node)
+
+    # Set node's explicit price using another node that shares the same instance type
     if new_node.instance_type in nodes_sharing_type:
         new_node.explicit_price = nodes_sharing_type[
             new_node.instance_type
         ].explicit_price
         continue
 
-    cost_request_message = f"this node with the name `{node_name}`"
+    # If not continued, add the node to shared nodes if it has an instance
     if new_node.instance_type:
         cost_request_message = f"one node of type {new_node.instance_type}"
         nodes_sharing_type[new_node.instance_type] = new_node
 
+    # If the cloud provider is unknown, let the user enter the explicit price of the node
     if not node_has_cloud_provider:
         new_node.explicit_price = float(
             get_input(
@@ -1028,7 +1074,7 @@ for index, node_json in enumerate(nodes_json["items"]):
         )
 
 
-# STEP 6 - Prepare to submit to the data
+# STEP 6 - Prepare to submit the data
 CLUSTER.prepare()
 submission = Submission(user_name, user_email, CLUSTER)
 submission_json = json.dumps(submission, default=serialize_object).encode("utf-8")

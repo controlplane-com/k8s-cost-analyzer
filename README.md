@@ -8,7 +8,7 @@ The analyzer will require you to enter your name and email. Upon successful exec
 
 ## Data Collection
 
-The K8s Cost Analyzer collect the following data:
+The K8s Cost Analyzer collects the following data:
 
 * Your name and email address (so you can receive the cost savings estimate).
 * The name and the Kubernetes version of the cluster.

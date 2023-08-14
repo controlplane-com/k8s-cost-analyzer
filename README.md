@@ -6,6 +6,15 @@ Below is an [installation guide](#installation-guide) to help you run the K8s co
 
 The analyzer will require you to enter your name and email. Upon successful execution, a URL will be printed in the terminal and an email containing the result will be sent to you. Visit the URL to view the results of the cost analysis.
 
+## Data Collection
+
+The K8s Cost Analyzer collect the following data:
+
+* Your name and email address (so you can receive the cost savings estimate).
+* The name and the Kubernetes version of the cluster.
+* The CPU and memory usage consumption of each namespace.
+* The cloud provider (e.g., AWS, GCP, etc.), type, capacity, and consumed CPU and memory of each node in the cluster.
+
 ## Prerequisites
 
 Before you begin, ensure you have the following:

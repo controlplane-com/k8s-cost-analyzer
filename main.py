@@ -94,6 +94,14 @@ class Component:
         self.usage_memory += memory
 
 
+class Application:
+    def __init__(self, name, node_name):
+        self.name = name
+        self.node_name = node_name
+        self.cpu_usage = 0.0
+        self.memory_usage = 0.0
+
+
 class Cluster:
     def __init__(self):
         self.name = ""
@@ -102,14 +110,15 @@ class Cluster:
         self.total_usage_memory = 0.0
         self.components = []
         self.nodes = []
+        self.applications = []
 
     def prepare(self):
         # Convert CPU from millicores to cores
         self.total_usage_cpu /= 1000
         for component in self.components:
             component.usage_cpu /= 1000
-        for node in self.nodes:
-            node.capacity_cpu /= 1000
+        for application in self.applications:
+            application.cpu_usage /= 1000
 
 
 class Submission:
@@ -138,6 +147,7 @@ CLOUD_PROVIDER_UNKNOWN = "unknown"
 # Pods Top/Get Column Names
 POD_NAMESPACE_COLUMN = "NAMESPACE"
 POD_NAME_COLUMN = "POD"
+POD_NODE_NAME_COLUMN = "NODE"
 POD_CONTAINER_NAME_COLUMN = "NAME"
 POD_CPU_COLUMN = "CPU(cores)"
 POD_MEMORY_COLUMN = "MEMORY"
@@ -162,7 +172,8 @@ TOP_PODS_TABLE_COLUMNS = {
 GET_PODS_TABLE_COLUMNS = {
     POD_NAMESPACE_COLUMN: 0,
     POD_NAME_COLUMN: 1,
-    POD_LABELS_COLUMN: 6,
+    POD_NODE_NAME_COLUMN: 7,
+    POD_LABELS_COLUMN: 10,
 }
 
 TOP_NODES_TABLE_COLUMNS = {
@@ -190,6 +201,7 @@ ISTIO_PROXY = Component("istio_proxy")
 LINKERD = Component("linkerd")
 LINKERD_VIZ = Component("linkerd_viz")
 CALICO = Component("calico")
+PROMETHEUS = Component("prometheus")
 
 CLUSTER.components.extend(
     [
@@ -202,6 +214,7 @@ CLUSTER.components.extend(
         LINKERD,
         LINKERD_VIZ,
         CALICO,
+        PROMETHEUS,
     ]
 )
 
@@ -686,7 +699,7 @@ def get_nested_value(keys_array, nested_dict, default_value):
 
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.0.4")
+    print("v1.0.5")
     sys.exit(0)
 
 ### START ###
@@ -790,7 +803,7 @@ else:
     )
 
     # STEP 3 - Start collecting metrics
-    cmd = "kubectl get pod -A --show-labels"
+    cmd = "kubectl get pod -A --show-labels -o wide"
     get_pods_output, cmd_code, cmd_err = run_system_command(
         cmd, "Collecting pods labels"
     )
@@ -816,7 +829,9 @@ else:
             f"`{cmd}` command returned an empty list, make sure you have pods running in your cluster"
         )
 
+    containers_dict = {}
     namespace_to_pod_mapping = {}
+    pod_name_to_node_name = {}
     get_pods_lines = get_pods_output.strip().split("\n")
     top_pods_lines = top_pods_output.strip().split("\n")
 
@@ -827,18 +842,22 @@ else:
         pod_namespace = fields[GET_PODS_TABLE_COLUMNS[POD_NAMESPACE_COLUMN]]
         pod_name = fields[GET_PODS_TABLE_COLUMNS[POD_NAME_COLUMN]]
         pod_labels = fields[GET_PODS_TABLE_COLUMNS[POD_LABELS_COLUMN]]
+        pod_node_name = fields[GET_PODS_TABLE_COLUMNS[POD_NODE_NAME_COLUMN]]
 
         if pod_namespace not in namespace_to_pod_mapping:
             namespace_to_pod_mapping[pod_namespace] = {}
 
         namespace_to_pod_mapping[pod_namespace][pod_name] = pod_labels
+        pod_name_to_node_name[pod_name] = pod_node_name
 
     # Iterate over pods and collect cpu and memory usage
     for top_pod in top_pods_lines[1:]:  # Start from second line and skip header
         fields = top_pod.split()  # Split line into fields
+        isComponent = True  # The value is True until proven False
 
         pod_namespace = fields[TOP_PODS_TABLE_COLUMNS[POD_NAMESPACE_COLUMN]]
         pod_name = fields[TOP_PODS_TABLE_COLUMNS[POD_NAME_COLUMN]]
+        pod_node_name = pod_name_to_node_name[pod_name]
         pod_container_name = fields[TOP_PODS_TABLE_COLUMNS[POD_CONTAINER_NAME_COLUMN]]
         pod_cpu = extract_value_from_unit(
             fields[TOP_PODS_TABLE_COLUMNS[POD_CPU_COLUMN]]
@@ -871,6 +890,12 @@ else:
             ISTIO_PROXY.add_usage(pod_cpu, pod_memory)
         elif "linkerd-proxy" in pod_container_name:
             LINKERD.add_usage(pod_cpu, pod_memory)
+        elif (
+            "prometheus" in pod_namespace
+            or "prometheus" in pod_name
+            or "prometheus" in pod_container_name
+        ):
+            PROMETHEUS.add_usage(pod_cpu, pod_memory)
         elif pod_has_labels:
             pod_labels = namespace_to_pod_mapping[pod_namespace][pod_name]
             if "app.kubernetes.io/name=knative-operator" in pod_labels:
@@ -881,6 +906,22 @@ else:
                 LINKERD_VIZ.add_usage(pod_cpu, pod_memory)
             elif "tigera-operator" in pod_labels:
                 CALICO.add_usage(pod_cpu, pod_memory)
+            else:
+                isComponent = False
+        else:
+            isComponent = False
+
+        # If the pod is not a component then it is an application
+        if not isComponent:
+            # Because the container might be used multiple times in different pods and namespaces,
+            # we group it under it's name in a dictionary and we increment the usage amount
+            if pod_container_name not in containers_dict:
+                new_application = Application(pod_container_name, pod_node_name)
+                containers_dict[pod_container_name] = new_application
+                CLUSTER.applications.append(new_application)
+
+            containers_dict[pod_container_name].cpu_usage += pod_cpu
+            containers_dict[pod_container_name].memory_usage += pod_memory
 
         CLUSTER.total_usage_cpu += pod_cpu
         CLUSTER.total_usage_memory += pod_memory
@@ -910,7 +951,7 @@ else:
         )
 
 
-# STEP 4- Get cluster name & kubernetes version
+# STEP 4 - Get cluster name & kubernetes version
 cmd = "kubectl config current-context"
 current_context_output, cmd_code, cmd_err = run_system_command(
     cmd, "Getting cluster name"
@@ -960,8 +1001,11 @@ for index, node_json in enumerate(nodes_json["items"]):
     new_node.capacity_cpu = extract_value_from_unit(
         get_nested_value(["status", "capacity", "cpu"], node_json, 0.0)
     )
-    new_node.capacity_memory = extract_value_from_unit(
-        get_nested_value(["status", "capacity", "memory"], node_json, 0.0)
+    new_node.capacity_memory = (
+        extract_value_from_unit(
+            get_nested_value(["status", "capacity", "memory"], node_json, 0.0)
+        )
+        / 1024
     )
     new_node.allocatable_cpu = (
         extract_value_from_unit(

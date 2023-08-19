@@ -575,7 +575,11 @@ def extract_value_from_unit(value):
         result = value  # Assume the value is already a number
     else:
         # Extract value and unit using the regular expression pattern
-        result, _ = re.match(r"^(\d+)([A-Za-z]+)$", value).groups()
+        try:
+            result, _ = re.match(r"^(\d+)([A-Za-z]+)$", value).groups()
+        except Exception as e:
+            # If the expression above threw an exception then the value is unknown
+            result = 0.0
 
     return float(result)
 
@@ -960,7 +964,7 @@ current_context_output, cmd_code, cmd_err = run_system_command(
 if cmd_code != 0:
     exit_script_on_error(try_cmd_error(cmd, cmd_err))
 
-cmd = "kubectl version --short -o json"
+cmd = "kubectl version -o json"
 kubernetes_version_json, cmd_code, cmd_err = run_system_command(
     cmd, "Getting kubernetes version"
 )

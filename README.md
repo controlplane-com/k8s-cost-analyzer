@@ -41,7 +41,7 @@ brew tap controlplane-com/cpln && brew install cpln-k8s-cost-analyzer
 Make sure you have [chocolatey](https://chocolatey.org/install) installed on the target machine then execute the following command in your terminal:
 
 ```bash
-choco install cpln-k8s-cost-analyzer --version=1.0.0
+choco install cpln-k8s-cost-analyzer --version=1.0.5
 ```
 
 Once downloaded successfully, run `cpln-k8s-cost-analyzer` in your terminal to execute the K8s cost analyzer.

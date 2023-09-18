@@ -12,7 +12,7 @@ The K8s Cost Analyzer collects the following data:
 
 * Your name and email address (so you can receive the cost savings estimate).
 * The name and the Kubernetes version of the cluster.
-* The CPU and memory usage consumption of each namespace.
+* The CPU and memory usage consumption of each application running in the cluster.
 * The cloud provider (e.g., AWS, GCP, etc.), type, capacity, and consumed CPU and memory of each node in the cluster.
 
 ## Prerequisites

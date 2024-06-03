@@ -42,7 +42,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [windows-latest, macOS-latest, ubuntu-latest]
+        os: [windows-latest, macOS-latest, macos-12, ubuntu-latest]
 
     steps:
       - name: Checkout repository
@@ -74,7 +74,12 @@ jobs:
 
           elseif ('${{ matrix.os }}' -eq 'macOS-latest')
           {
-            $type = "macOS"
+            $type = "macOS-arm64"
+          }
+
+          elseif ('${{ matrix.os }}' -eq 'macOS-12')
+          {
+            $type = "macOS-x64"
           }
 
           else

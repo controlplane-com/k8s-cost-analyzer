@@ -1035,6 +1035,62 @@ def process_pods_prometheus_query(
     return pod_namespace_to_pod_data
 
 
+def submit_cluster(submission):
+    """
+    Submit cluster data to the backend service
+
+    Parameters:
+        - submission (`Submission`): An instance of the Submission class.
+
+    Returns: `None`
+    """
+
+    try:
+        submission_json = json.dumps(submission, default=serialize_object)
+        headers = {"Content-Type": "application/json"}
+
+        LOADING_ANIMATION.start_loading("Submitting the cluster info to the backend")
+        http_response = requests.post(ENDPOINT, headers=headers, data=submission_json)
+        LOADING_ANIMATION.stop_loading()
+
+        # Check if the backend service was unable to figure out the prices for some nodes
+        if http_response.status_code == 422:
+            unpriced_nodes = http_response.json()["message"]
+
+            # Prompt the user to enter the price for each failed node
+            for unpriced_node in unpriced_nodes:
+                explicit_price = float(
+                    get_input(
+                        f"Machine type cost unknown. Please provide the monthly cost for '{unpriced_node['instance_type']}' region '{unpriced_node['region']}':",
+                        validate_number,
+                    )
+                )
+
+                # Update the cluster data
+                for node in submission.cluster.nodes:
+                    if (
+                        node.instance_type == unpriced_node["instance_type"]
+                        and node.region == unpriced_node["region"]
+                    ):
+                        node.explicit_price = explicit_price
+
+            # Retry request
+            submit_cluster(submission)
+            return
+
+        # For any other fail reason, exit with an error
+        if http_response.status_code < 200 or http_response.status_code > 299:
+            exit_script_on_error(http_response.content.decode("utf-8"))
+
+        log_success("The script has executed successfully!")
+        log_success(f"Here is the link to your result: {http_response.json()}")
+
+    except Exception as e:
+        exit_script_on_error(
+            f"We encountered an issue with the request, please contact the Control Plane team and share this error message: {str(e)}"
+        )
+
+
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
     print("v1.0.5")
@@ -1569,24 +1625,7 @@ for index, node_json in enumerate(nodes_json["items"]):
 # STEP 7 - Prepare to submit the data
 CLUSTER.prepare()
 submission = Submission(user_name, user_email, CLUSTER)
-submission_json = json.dumps(submission, default=serialize_object)
 log_info("[INFO] Cluster info has been collected successfully \n")
 
 # STEP 8 - Submit the data
-try:
-    headers = {"Content-Type": "application/json"}
-
-    LOADING_ANIMATION.start_loading("Submitting the cluster info to the backend")
-    http_response = requests.post(ENDPOINT, headers=headers, data=submission_json)
-    LOADING_ANIMATION.stop_loading()
-
-    if http_response.status_code < 200 or http_response.status_code > 299:
-        exit_script_on_error(http_response.content.decode("utf-8"))
-
-    log_success("The script has executed successfully!")
-    log_success(f"Here is the link to your result: {http_response.json()}")
-
-except Exception as e:
-    exit_script_on_error(
-        f"We encountered an issue with the request, please contact the Control Plane team and share this error message: {str(e)}"
-    )
+submit_cluster(submission)

@@ -42,7 +42,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, macOS-latest, ubuntu-latest]
 
     steps:
       - name: Checkout repository
@@ -70,6 +70,11 @@ jobs:
           {
             $type = "win-x64"
             $extension = ".exe"
+          }
+
+          elseif ('${{ matrix.os }}' -eq 'macOS-latest')
+          {
+            $type = "macOS"
           }
 
           else

@@ -728,6 +728,93 @@ def get_top_nodes():
     return output, error_message
 
 
+def get_top_level_controller_in_memory(namespace, pod_name, depth=5):
+    """
+    Recursively trace a Pod's ownerReferences up to a maximum depth (default=5).
+    Returns (top_kind, top_name). If there are no more owners or we exceed the depth,
+    it returns ("Pod", pod_name).
+
+    Args:
+        namespace (str): The namespace of the Pod.
+        pod_name (str): The name of the Pod.
+        depth (int): The maximum recursion depth. Defaults to 5.
+
+    Returns:
+        (str, str): A tuple containing the final top-level controller kind and name.
+    """
+    # Prevent infinite recursion by limiting depth
+    if depth <= 0:
+        return ("Pod", pod_name)
+
+    # Search for the matching Pod object in pods_all_json
+    key_pod = None
+    for item in pods_all_json["items"]:
+        if item["metadata"]["name"] == pod_name and item["metadata"]["namespace"] == namespace:
+            key_pod = item
+            break
+
+    # If the Pod doesn't exist in pods_all_json, treat it as top-level
+    if not key_pod:
+        return ("Pod", pod_name)
+
+    # Get the Pod's ownerReferences (list of owners)
+    owners = key_pod["metadata"].get("ownerReferences", [])
+
+    # If no owners, it's top-level
+    if not owners:
+        return ("Pod", pod_name)
+
+    # Look for the main controller, if any
+    primary_owner = next((ref for ref in owners if ref.get("controller", False)), None)
+    if not primary_owner:
+        primary_owner = owners[0]
+
+    # Get the kind and name of the primary owner
+    owner_kind = primary_owner.get("kind")
+    owner_name = primary_owner.get("name")
+
+    # Consider certain kinds (Deployment, StatefulSet, DaemonSet) immediately top-level
+    if owner_kind in ["Deployment", "StatefulSet", "DaemonSet"]:
+        return (owner_kind, owner_name)
+
+    # If it's a Job, check if it's owned by a CronJob.
+    elif owner_kind == "Job":
+        job_item = jobs_dict.get((namespace, owner_name))
+        if not job_item:
+            return ("Job", owner_name)
+        job_owners = job_item["metadata"].get("ownerReferences", [])
+        if not job_owners:
+            return ("Job", owner_name)
+        job_primary = next((r for r in job_owners if r.get("controller", False)), job_owners[0])
+        if job_primary["kind"] == "CronJob":
+            return ("CronJob", job_primary["name"])
+        return (job_primary["kind"], job_primary["name"])
+
+    # CronJob is typically considered top-level.
+    elif owner_kind == "CronJob":
+        return (owner_kind, owner_name)
+
+    # If it's a ReplicaSet, we may find a higher-level Deployment, etc.
+    if owner_kind == "ReplicaSet":
+        rs_item = replicaset_dict.get((namespace, owner_name))
+        if not rs_item:
+            return (owner_kind, owner_name)
+        rs_owners = rs_item["metadata"].get("ownerReferences", [])
+        if not rs_owners:
+            return (owner_kind, owner_name)
+        rs_primary = next((r for r in rs_owners if r.get("controller", False)), None)
+        if not rs_primary:
+            rs_primary = rs_owners[0]
+        if rs_primary["kind"] in ["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"]:
+            return (rs_primary["kind"], rs_primary["name"])
+        
+        # Otherwise, keep climbing up one more level.
+        return get_top_level_controller_in_memory(namespace, owner_name, depth - 1)
+
+    # If it's something else unknown, treat the current resource as top-level.
+    return (owner_kind, owner_name)
+
+
 def get_prometheus_servers():
     """
     Safely retrieves prometheus servers that are available in the cluster
@@ -1093,7 +1180,7 @@ def submit_cluster(submission):
 
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.1.1")
+    print("v1.1.2")
     sys.exit(0)
 
 ### START ###
@@ -1393,30 +1480,87 @@ except Exception as e:
     )
 
 # STEP 5 - Process pods
-cmd = "kubectl get pod -A --show-labels -o wide"
-get_pods_output, cmd_code, cmd_err = run_system_command(cmd, "Collecting pods labels")
-
-if cmd_code != 0 or cmd_err:
+cmd = "kubectl get pods -A -o json"
+pods_all_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all Pods as JSON")
+if cmd_code != 0 or not pods_all_json_str:
     exit_script_on_error(try_cmd_error(cmd, cmd_err))
+pods_all_json = json.loads(pods_all_json_str)
 
-if not get_pods_output or len(get_pods_output.strip().split("\n")) < 2:
-    exit_script_on_error(
-        f"`{cmd}` command returned an empty list, make sure you have pods running in your cluster"
-    )
+cmd = "kubectl get replicasets -A -o json"
+replicasets_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all ReplicaSets as JSON")
+if cmd_code != 0 or not replicasets_json_str:
+    exit_script_on_error(try_cmd_error(cmd, cmd_err))
+replicasets_json = json.loads(replicasets_json_str)
 
-containers_dict = {}
+cmd = "kubectl get deployments -A -o json"
+deployments_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all Deployments as JSON")
+if cmd_code != 0 or not deployments_json_str:
+    exit_script_on_error(try_cmd_error(cmd, cmd_err))
+deployments_json = json.loads(deployments_json_str)
+
+cmd = "kubectl get statefulsets -A -o json"
+statefulsets_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all StatefulSets as JSON")
+statefulsets_json = json.loads(statefulsets_json_str)
+
+cmd = "kubectl get daemonsets -A -o json"
+daemonsets_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all DaemonSets as JSON")
+daemonsets_json = json.loads(daemonsets_json_str)
+
+cmd = "kubectl get jobs -A -o json"
+jobs_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all Jobs as JSON")
+jobs_json = json.loads(jobs_json_str)
+
+cmd = "kubectl get cronjobs -A -o json"
+cronjobs_json_str, cmd_code, cmd_err = run_system_command(cmd, "Collecting all CronJobs as JSON")
+cronjobs_json = json.loads(cronjobs_json_str)
+
+# Build dictionaries for quick lookups
+replicaset_dict = {}
+for rs_item in replicasets_json.get("items", []):
+    rs_ns = rs_item["metadata"]["namespace"]
+    rs_name = rs_item["metadata"]["name"]
+    replicaset_dict[(rs_ns, rs_name)] = rs_item
+
+deployment_dict = {}
+for dep_item in deployments_json.get("items", []):
+    dep_ns = dep_item["metadata"]["namespace"]
+    dep_name = dep_item["metadata"]["name"]
+    deployment_dict[(dep_ns, dep_name)] = dep_item
+
+statefulset_dict = {}
+for sts_item in statefulsets_json.get("items", []):
+    sts_ns = sts_item["metadata"]["namespace"]
+    sts_name = sts_item["metadata"]["name"]
+    statefulset_dict[(sts_ns, sts_name)] = sts_item
+
+daemonset_dict = {}
+for ds_item in daemonsets_json.get("items", []):
+    ds_ns = ds_item["metadata"]["namespace"]
+    ds_name = ds_item["metadata"]["name"]
+    daemonset_dict[(ds_ns, ds_name)] = ds_item
+
+jobs_dict = {}
+for job_item in jobs_json.get("items", []):
+    job_ns = job_item["metadata"]["namespace"]
+    job_name = job_item["metadata"]["name"]
+    jobs_dict[(job_ns, job_name)] = job_item
+
+cronjobs_dict = {}
+for cj_item in cronjobs_json.get("items", []):
+    cj_ns = cj_item["metadata"]["namespace"]
+    cj_name = cj_item["metadata"]["name"]
+    cronjobs_dict[(cj_ns, cj_name)] = cj_item
+
+applications_dict = {}
 pod_name_to_node_name = {}
 namespace_to_pod_mapping = {}
-get_pods_lines = get_pods_output.strip().split("\n")
 
-# Iterate over pods with labels and map pod name to labels
-for get_pod in get_pods_lines[1:]:
-    fields = get_pod.split()
-
-    pod_namespace = fields[GET_PODS_TABLE_COLUMNS[POD_NAMESPACE_COLUMN]]
-    pod_name = fields[GET_PODS_TABLE_COLUMNS[POD_NAME_COLUMN]]
-    pod_labels = fields[GET_PODS_TABLE_COLUMNS[POD_LABELS_COLUMN]]
-    pod_node_name = fields[GET_PODS_TABLE_COLUMNS[POD_NODE_NAME_COLUMN]]
+# Also get full pod info from this new JSON to map the node & labels
+for pod_item in pods_all_json.get("items", []):
+    pod_namespace = pod_item["metadata"]["namespace"]
+    pod_name = pod_item["metadata"]["name"]
+    pod_labels = pod_item["metadata"].get("labels", {})
+    pod_node_name = get_nested_value(["spec","nodeName"], pod_item, "")
 
     if pod_namespace not in namespace_to_pod_mapping:
         namespace_to_pod_mapping[pod_namespace] = {}
@@ -1480,15 +1624,26 @@ for pod in PODS_USAGE_CONSUMPTION_LIST:
 
     # If the pod is not a component then it is an application
     if not isComponent:
-        # Because the container might be used multiple times in different pods and namespaces,
-        # we group it under it's name in a dictionary and we increment the usage amount
-        if pod.container not in containers_dict:
-            new_application = Application(pod.container, pod_node_name)
-            containers_dict[pod.container] = new_application
+        # Get the top level controller kind and name of the pod
+        top_kind, top_name = get_top_level_controller_in_memory(pod.namespace, pod.name, depth=5)
+
+        # e.g. "Deployment/my-app"
+        top_level_id = f"{pod.namespace}/{top_kind}/{top_name}"
+
+        # Initialize a new application if it does not exist
+        if top_level_id not in applications_dict:
+            # Create a new application
+            new_application = Application(top_level_id, pod_node_name)
+
+            # Map the application id to the applications dictionary
+            applications_dict[top_level_id] = new_application
+
+            # Add the application to the cluster
             CLUSTER.applications.append(new_application)
 
-        containers_dict[pod.container].cpu_usage += pod.cpu
-        containers_dict[pod.container].memory_usage += pod.memory
+        # Add the pod's usage to the application
+        applications_dict[top_level_id].cpu_usage += pod.cpu
+        applications_dict[top_level_id].memory_usage += pod.memory
 
     CLUSTER.total_usage_cpu += pod.cpu
     CLUSTER.total_usage_memory += pod.memory

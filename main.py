@@ -1180,7 +1180,7 @@ def submit_cluster(submission):
 
 ### Handle Arguments ###
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("v1.1.2")
+    print("v1.1.3")
     sys.exit(0)
 
 ### START ###
